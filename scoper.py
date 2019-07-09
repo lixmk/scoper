@@ -5,8 +5,7 @@
 
 
 # TODO: Upper to Lower All output
-# TODO: Remove ISP Domains
-# TODO: Related to ^: Build function for checking ISP Domains
+# TODO: Remove ISP Domains via isp list vs current method
 # TODO: Parse out Zone Transfer alerts from fierce
 # TODO: Add logging functionality
 # TODO: Add extra output option to save all results from each test (ie: Crt.sh pages, bing pages, etc)
@@ -220,7 +219,7 @@ def parsemass():
                     cname = re.split('/', cname)[0]
                 if ',' in cname:
                     cname = re.split(',', cname)[0]
-                if len(cname) > 0 and (ip, cname) not in masshostnames and '*' not in cname and '.' in cname:
+                if len(cname) > 0 and (ip, cname) not in masshostnames and '*' not in cname and ':' not in cname and '.' in cname:
                     namesplit = re.split('\.',cname)
                     subnum = int(len(namesplit) - 1)
                     if namesplit[subnum].isdigit() == False:
@@ -232,7 +231,7 @@ def parsemass():
                         name = re.split('/', name)[0]
                     if ',' in name:
                         name = re.split(',', name)[0]
-                    if (ip, name) not in masshostnames and '*' not in name and '.' in name:
+                    if (ip, name) not in masshostnames and '*' not in name and ':' not in name and '.' in name:
                         namesplit = re.split('\.',name)
                         subnum = int(len(namesplit) - 1)
                         if namesplit[subnum].isdigit() == False:
@@ -269,7 +268,6 @@ def bingip():
         sys.stdout.flush()
         bingurl = "http://www.bing.com/search?q=ip%3A"+ip
         crthostcount = 0
-        # Sketchy shit to fix SSL Cert stuff. Will try installing synack cert in OS later.
         sslcontext = ssl.create_default_context()
         sslcontext.check_hostname=False
         sslcontext.verify_mode = ssl.CERT_NONE
