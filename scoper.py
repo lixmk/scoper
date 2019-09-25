@@ -9,6 +9,7 @@
 # TODO: Parse out Zone Transfer alerts from fierce
 # TODO: Add logging functionality
 # TODO: Add extra output option to save all results from each test (ie: Crt.sh pages, bing pages, etc)
+# TODO: Remove "Bing Error on" Output, it's useless
 
 import argparse
 import re
@@ -30,6 +31,7 @@ from cidrize import cidrize
 cidrs = []              # Input file parsed
 parserr = []            # Errored parsing IPs
 scope = []              # Individual IPs in scope
+synack = []             # Holder for Synack Scope
 nmapscope = []          # Used to break up scope into digestible sizes
 nmaphostnames = []      # Hostnames discovered by Nmap
 fiercetargets = []      # domains and subdomains for fierce targeting. Derived from nmaphostnames
@@ -64,6 +66,25 @@ def printtitle():
     print "\033[1m\033[91m= = =\033[0m                                    \033[1m\033[91m= = =\033[0m"
     print "\033[1m\033[91m##############################################\033[0m"
     print ""
+
+# Parse input file, Synack C/P
+def parse_synack():
+    print stat+"Parsing input file"
+    with open(filein) as f:
+        lines = f.readlines()
+        for line in lines:
+            cidrlines = re.findall('[0-9]{1,3}?\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}',line)
+            for cidr in cidrlines:
+                synack.append(cidr)
+    for iprange in synack:
+        for ip in IPNetwork(iprange):
+            if str(ip) not in scope:
+                scope.append(str(ip))
+            with open(fullpath+"inscope-ips.txt","a+") as f:
+                f.write(str(ip)+'\n')
+    print good+"Total in scope IP addresses: "+str(len(scope))
+    return scope
+
 
 # Parse input file
 def parse_scope():
@@ -145,7 +166,7 @@ def nmapresolve():
                     print stat+"Continuing w/ next part"
                     goodresp = 1
                 else:
-                    print warn+"You only have two options dipshit..."
+                    print warn+"Invalid Option..."
     print ""
     print good+"Nmap lookup complete. Hostnames found: "+str(len(nmaphostnames))
     return nmaphostnames
@@ -194,7 +215,7 @@ def scanmass():
                     print stat+"Continuing with next part"
                     goodresp = 1
                 else:
-                    print warn+"You only have two options dipshit..."
+                    print warn+"Invalid Option..."
     print ""
     print good+"Masscan complete. Total hosts with 443 open: "+str(count)
     return masshosts
@@ -250,7 +271,7 @@ def parsemass():
                         print stat+"Continuing cert checks"
                         goodresp = 1
                     else:
-                        print warn+"You only have two options dipshit..."
+                        print warn+"Invalid Option..."
         print "\n"+good+"Hostname check complete. Hostnames found: "+str(len(masshostnames))
     else:
         print warn+"Masscan found no hosts with 443 open :("
@@ -285,6 +306,8 @@ def bingip():
                                 hostname = str(re.split('/', re.sub('https://', '', nostrong))[0]).lower()
                                 if (ip, hostname) not in binghostnames:
                                     binghostnames.append((ip, hostname))
+                                    with open(fullpath+"bingfound.txt","a+") as f:
+                                        f.write(ip+" - "+hostname+"\n")
         except (KeyboardInterrupt, SystemExit):
             print ""
             goodresp = 0
@@ -297,9 +320,8 @@ def bingip():
                     print stat+"Continuing Bing searches"
                     goodresp = 1
                 else:
-                    print warn+"You only have two options dipshit..."
+                    print warn+"Invalid Option..."
         except:
-            print "\n"+warn+"Bing Error on: "+ip
             pass
     print "\n"+good+"Bing IP Search complete. Hosts found: "+str(len(binghostnames))
     return binghostnames
@@ -379,7 +401,7 @@ def checkcrtsh():
                     break
                     goodresp = 1
                 else:
-                    print warn+"You only have two options dipshit..."
+                    print warn+"Invalid Option..."
         except socket.gaierror:
             pass
         except:
@@ -415,7 +437,7 @@ def resolvecrt():
                     pass
                     goodresp = 1
                 else:
-                    print warn+"You only have two options dipshit..."
+                    print warn+"Invalid Option..."
     print "\n"+good+"Resolution complete. Hostnames resolved to IP: "+str(len(crthostnames))
     return crthostnames
 
@@ -496,7 +518,7 @@ def execfierce():
                     print warn+"Killing fierce: "+target
                     goodresp = 1
                 else:
-                    print warn+"You only have two options dipshit..."
+                    print warn+"Invalid Option..."
     print good+"Fierce complete"
     return fiercehostnames
 
@@ -504,34 +526,63 @@ def execfierce():
 def resultsout():
     print stat+"Comparing all results to in-scope IPs"
     print stat+"This may take a while depending on number of hostnames found"
-    nmapcount = 0
-    for pair in nmaphostnames:
-        if pair[0] in scope and pair not in scopehostnames:
-            scopehostnames.append(pair)
-            nmapcount += 1
-    masscount = 0
-    for pair in masshostnames:
-        if pair[0] in scope and pair not in scopehostnames:
-            scopehostnames.append(pair)
-            masscount += 1
-    bingcount = 0
-    for pair in binghostnames:
-        if pair[0] in scope and pair not in scopehostnames:
-            scopehostnames.append(pair)
-            bingcount =+ 1
-    crtcount = 0
-    for pair in crthostnames:
-        if pair[0] in scope and pair not in scopehostnames:
-            scopehostnames.append(pair)
-            crtcount += 1
-    fiercecount = 0
-    for pair in fiercehostnames:
-        if pair[0] in scope and pair not in scopehostnames:
-            scopehostnames.append(pair)
-            fiercecount += 1
-    for pair in scopehostnames:
-        with open(fullpath+"inscope-hostnames.txt","a+") as f:
-            f.write(pair[0]+" - "+pair[1].rstrip('.')+'\n')
+    if noscope == 0:
+        nmapcount = 0
+        for pair in nmaphostnames:
+            if pair[0] in scope and pair not in scopehostnames:
+                scopehostnames.append(pair)
+                nmapcount += 1
+        masscount = 0
+        for pair in masshostnames:
+            if pair[0] in scope and pair not in scopehostnames:
+                scopehostnames.append(pair)
+                masscount += 1
+        bingcount = 0
+        for pair in binghostnames:
+            if pair[0] in scope and pair not in scopehostnames:
+                scopehostnames.append(pair)
+                bingcount =+ 1
+        crtcount = 0
+        for pair in crthostnames:
+            if pair[0] in scope and pair not in scopehostnames:
+                scopehostnames.append(pair)
+                crtcount += 1
+        fiercecount = 0
+        for pair in fiercehostnames:
+            if pair[0] in scope and pair not in scopehostnames:
+                scopehostnames.append(pair)
+                fiercecount += 1
+        for pair in scopehostnames:
+            with open(fullpath+"inscope-hostnames.txt","a+") as f:
+                f.write(pair[0]+" - "+pair[1].rstrip('.')+'\n')
+    if noscope == 1:
+        for pair in nmaphostnames:
+            if pair not in scopehostnames:
+                scopehostnames.append(pair)
+                nmapcount += 1
+        masscount = 0
+        for pair in masshostnames:
+            if pair not in scopehostnames:
+                scopehostnames.append(pair)
+                masscount += 1
+        bingcount = 0
+        for pair in binghostnames:
+            if pair not in scopehostnames:
+                scopehostnames.append(pair)
+                bingcount =+ 1
+        crtcount = 0
+        for pair in crthostnames:
+            if pair not in scopehostnames:
+                scopehostnames.append(pair)
+                crtcount += 1
+        fiercecount = 0
+        for pair in fiercehostnames:
+            if pair not in scopehostnames:
+                scopehostnames.append(pair)
+                fiercecount += 1
+        for pair in scopehostnames:
+            with open(fullpath+"inscope-hostnames.txt","a+") as f:
+                f.write(pair[0]+" - "+pair[1].rstrip('.')+'\n')
     print stat+"Results comparison complete"
     print ""
     print mods+"= = = = = = = = = = = = = = = ="+mode
@@ -575,12 +626,15 @@ def main():
                 print warn+"Not Overwriting... killing scoper.py"
                 sys.exit()
             else:
-                print warn+"You only have two options dipshit..."
+                print warn+"Invalid Option..."
     else:
         os.mkdir(fullpath)
     os.mkdir(fullpath+"/fierce")
     print mods+"= = = IP Parser = = ="+mode
-    parse_scope()
+    if synscope == True:
+        parse_synack()
+    else:
+        parse_scope()
     if domains > 0:
         print mods+"= = = Custom Domains = = ="+mode
         adddomains()
@@ -618,6 +672,8 @@ if __name__ == '__main__':
     parser.add_argument('-t', '--timeout', default=10, help="Socket timeout, default 10")
     parser.add_argument('-o', '--outdir', default="scoper", help="Output directory, relative, no ./ needed")
     parser.add_argument('-a', '--execall', action="store_true", default=False, help="same as -n -m -b -c -f")
+    parser.add_argument('-N', '--noscope', action="store_true", default=False, help="Disable scope comparison")
+    parser.add_argument('-s', '--synack', action="store_true", default=False, help="Take copy/paste from Synack scope section")
     args = parser.parse_args()
     filein = args.filein
     domains = args.domains
@@ -629,6 +685,8 @@ if __name__ == '__main__':
     timeout = args.timeout
     outdir = args.outdir
     execall = args.execall
+    noscope = args.noscope
+    synscope = args.synack
     if execall:
         nmaprun = True
         mass = True
