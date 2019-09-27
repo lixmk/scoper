@@ -9,7 +9,6 @@
 # TODO: Parse out Zone Transfer alerts from fierce
 # TODO: Add logging functionality
 # TODO: Add extra output option to save all results from each test (ie: Crt.sh pages, bing pages, etc)
-# TODO: Remove "Bing Error on" Output, it's useless
 
 import argparse
 import re
@@ -26,6 +25,10 @@ from netaddr import IPNetwork
 from libnmap.process import NmapProcess
 from libnmap.parser import NmapParser
 from cidrize import cidrize
+from time import sleep
+
+#API Key for Shodan
+apikey = ""
 
 # Global declairations. Some of this may not need to be global, but if it works, it works
 cidrs = []              # Input file parsed
@@ -45,6 +48,7 @@ binghostnames = []      # Hostnames discovered via Bing IP search
 masscope = []           # Target IPs to give to masscan, broken down into 256 IP chunks
 masshosts = []          # Inital masscan ips with 443 open
 masshostnames = []      # discovered hostnames
+basedomains = []
 fullpath = ""           # Output path, default ./scoper
 ccodes = ['ac','ad','ae','af','ag','ai','al','am','an','ao','aq','ar','as','at','au','aw','ax','az','ba','bb','bd','be','bf','bg','bh','bi','bj','bl','bm','bn','bo','bq','br','bs','bt','bv','bw','by','bz','ca','cc','cd','cf','cg','ch','ci','ck','cl','cm','cn','co','cr','cu','cv','cw','cx','cy','cz','de','dj','dk','dm','do','dz','ec','ee','eg','eh','er','es','et','eu','fi','fj','fk','fm','fo','fr','ga','gb','gd','ge','gf','gg','gh','gi','gl','gm','gn','gp','gq','gr','gs','gt','gu','gw','gy','hk','hm','hn','hr','ht','hu','id','ie','il','im','in','io','iq','ir','is','it','je','jm','jo','jp','ke','kg','kh','ki','km','kn','kp','kr','kw','ky','kz','la','lb','lc','li','lk','lr','ls','lt','lu','lv','ly','ma','mc','md','me','mf','mg','mh','mk','ml','mm','mn','mo','mp','mq','mr','ms','mt','mu','mv','mw','mx','my','mz','na','nc','ne','nf','ng','ni','nl','no','np','nr','nu','nz','om','pa','pe','pf','pg','ph','pk','pl','pm','pn','pr','ps','pt','pw','py','qa','re','ro','rs','ru','rw','sa','sb','sc','sd','se','sg','sh','si','sj','sk','sl','sm','sn','so','sr','ss','st','su','sv','sx','sy','sz','tc','td','tf','tg','th','tj','tk','tl','tm','tn','to','tp','tr','tt','tv','tw','tz','ua','ug','uk','um','us','uy','uz','va','vc','ve','vg','vi','vn','vu','wf','ws','yt','za','zm','zw']
 isps = [] # NEED TO DO THIS
@@ -240,6 +244,8 @@ def parsemass():
                     cname = re.split('/', cname)[0]
                 if ',' in cname:
                     cname = re.split(',', cname)[0]
+                if ':' in cname:
+                    cname = re.split(':', cname)[0]
                 if len(cname) > 0 and (ip, cname) not in masshostnames and '*' not in cname and ':' not in cname and '.' in cname:
                     namesplit = re.split('\.',cname)
                     subnum = int(len(namesplit) - 1)
@@ -252,6 +258,8 @@ def parsemass():
                         name = re.split('/', name)[0]
                     if ',' in name:
                         name = re.split(',', name)[0]
+                    if ':' in cname:
+                        cname = re.split(':', cname)[0]
                     if (ip, name) not in masshostnames and '*' not in name and ':' not in name and '.' in name:
                         namesplit = re.split('\.',name)
                         subnum = int(len(namesplit) - 1)
@@ -279,7 +287,7 @@ def parsemass():
 
 # Search Bing for IP Addresses to discover hostnames
 def bingip():
-    print stat+"Executing Bing IP search"
+    print stat+"Executing Bing IP searches"
     bingcount = len(scope)
     count=0
     for ip in scope:
@@ -288,7 +296,6 @@ def bingip():
         sys.stdout.write("\r"+stat+"   IP "+str(count)+" of "+str(bingcount))
         sys.stdout.flush()
         bingurl = "http://www.bing.com/search?q=ip%3A"+ip
-        crthostcount = 0
         sslcontext = ssl.create_default_context()
         sslcontext.check_hostname=False
         sslcontext.verify_mode = ssl.CERT_NONE
@@ -304,6 +311,8 @@ def bingip():
                             nostrong = re.sub('</strong>', '', re.sub("<strong>", '', newline))
                             if '>' not in nostrong and '.' in nostrong:
                                 hostname = str(re.split('/', re.sub('https://', '', nostrong))[0]).lower()
+                                if ':' in hostname:
+                                    hostname = re.split(':', hostname)[0]
                                 if (ip, hostname) not in binghostnames:
                                     binghostnames.append((ip, hostname))
                                     with open(fullpath+"bingfound.txt","a+") as f:
@@ -312,7 +321,7 @@ def bingip():
             print ""
             goodresp = 0
             while goodresp == 0:
-                resp = raw_input(warn+'Interrupt Caught. Want to kill Bing Search? (y|n): ')
+                resp = raw_input(warn+'Interrupt Caught. Want to kill Bing searches? (y|n): ')
                 if "y" in resp:
                     print warn+"Killing all Bing searches"
                     return binghostnames
@@ -323,7 +332,7 @@ def bingip():
                     print warn+"Invalid Option..."
         except:
             pass
-    print "\n"+good+"Bing IP Search complete. Hosts found: "+str(len(binghostnames))
+    print "\n"+good+"Bing IP search complete. Hosts found: "+str(len(binghostnames))
     return binghostnames
 
 ###
@@ -441,10 +450,49 @@ def resolvecrt():
     print "\n"+good+"Resolution complete. Hostnames resolved to IP: "+str(len(crthostnames))
     return crthostnames
 
-###
-# This simply generates a list of target domains and subdomain for Fierce
-# Basically removes the first "octet" of the full host name and checks for uniqueness
-###
+# Search Bing for IP Addresses to discover hostnames
+def shodansearch():
+    print stat+"Executing Shodan searches"
+    shodancount = len(scope)
+    count=0
+    for ip in scope:
+        count +=1
+        sys.stdout.flush()
+        sys.stdout.write("\r"+stat+"   IP "+str(count)+" of "+str(shodancount))
+        sys.stdout.flush()
+        shodanurl = "https://api.shodan.io/shodan/host/"+ip+"?key="+apikey
+        sslcontext = ssl.create_default_context()
+        sslcontext.check_hostname=False
+        sslcontext.verify_mode = ssl.CERT_NONE
+        # Get results
+        try:
+            datarecv = urllib2.urlopen(shodanurl, context=sslcontext)
+            datatext = datarecv.readlines()
+            for line in datatext:
+                with open(fullpath+"/shodan/"+ip+".json",'a+') as f:
+                    f.write(line)
+            #if (ip, hostname) not in shodanhostnames:
+                #shodanhostnames.append((ip, hostname))
+        except (KeyboardInterrupt, SystemExit):
+            print ""
+            goodresp = 0
+            while goodresp == 0:
+                resp = raw_input(warn+'Interrupt Caught. Want to kill Shodan searches? (y|n): ')
+                if "y" in resp:
+                    print warn+"Killing all Shodan searches"
+                    return shodanhostnames
+                elif "n" in resp:
+                    print stat+"Continuing Shodan searches"
+                    goodresp = 1
+                else:
+                    print warn+"Invalid Option..."
+        except:
+            pass
+        sleep(1.5)
+    print "\n"+good+"Shodan search complete. Hosts found: "
+    #return shodanhostnames
+
+
 def genfierce():
     print stat+"Generating target domains/subdomains for fierce"
     for host in nmaphostnames:
@@ -555,7 +603,7 @@ def resultsout():
         for pair in scopehostnames:
             with open(fullpath+"inscope-hostnames.txt","a+") as f:
                 f.write(pair[0]+" - "+pair[1].rstrip('.')+'\n')
-    if noscope == 1:
+    if noscope:
         for pair in nmaphostnames:
             if pair not in scopehostnames:
                 scopehostnames.append(pair)
@@ -581,8 +629,22 @@ def resultsout():
                 scopehostnames.append(pair)
                 fiercecount += 1
         for pair in scopehostnames:
-            with open(fullpath+"inscope-hostnames.txt","a+") as f:
+            with open(fullpath+"discovered-hostnames.txt","a+") as f:
                 f.write(pair[0]+" - "+pair[1].rstrip('.')+'\n')
+        # Building List of Base Domain Names
+        for pair in scopehostnames:
+            hostsplit = re.split('\.',pair[1])
+            subnum = int(len(hostsplit) - 1)
+            if subnum > 1 and hostsplit[subnum] in ccodes:
+                domain = hostsplit[(subnum - 2)]+"."+hostsplit[(subnum - 1)]+"."+hostsplit[subnum]
+            else:
+                domain = hostsplit[(subnum - 1)]+"."+hostsplit[subnum]
+            if domain not in basedomains:
+                basedomains.append(domain)
+        for dom in basedomains:
+            with open(fullpath+"base-domains.txt","a+") as f:
+                f.write(dom+'\n')
+
     print stat+"Results comparison complete"
     print ""
     print mods+"= = = = = = = = = = = = = = = ="+mode
@@ -593,30 +655,41 @@ def resultsout():
     print stat+"All output saved to directory "+fullpath
     if fierce:
         print stat+"Raw fierce output in "+fullpath+"fierce/"
-    print good+"Total IPs in scope (inscope-ips.txt): "+str(len(scope))
+    if bing:
+        print stat+"Hostnames discovered via Bing in "+fullpath+"bingfound.txt"
+    if noscope == False:
+        print good+"Total IPs in scope (inscope-ips.txt): "+str(len(scope))
     if nmaprun:
         print stat+"Nmap discovered hostnames: "+str(len(nmaphostnames))
-        print good+"Nmap discovered in scope: "+str(nmapcount)
+        if noscope == False:
+            print good+"Nmap discovered in scope: "+str(nmapcount)
     if mass:
         print stat+"Masscan discovered hostnames: "+str(len(masshostnames))
-        print good+"Masscan discovered in scope: "+str(masscount)
+        if noscope == False:
+            print good+"Masscan discovered in scope: "+str(masscount)
     if bing:
         print stat+"Bing discovered hostnames: "+str(len(binghostnames))
-        print good+"Bing discovered in scope: "+str(bingcount)
+        if noscope == False:
+            print good+"Bing discovered in scope: "+str(bingcount)
     if crtsh:
         print stat+"Crt.sh discovered hostnames: "+str(len(crthostnames))
-        print good+"Crt.sh discovered in scope: "+str(crtcount)
+        if noscope == False:
+            print good+"Crt.sh discovered in scope: "+str(crtcount)
     if fierce:
         print stat+"Fierce discovered hostnames: "+str(len(fiercehostnames))
-        print good+"Fierce discovered in scope: "+str(fiercecount)
-    print good+"Total in-scope hostnames (inscope-hostnames.txt): "+str(len(scopehostnames))
+        if noscope == False:
+            print good+"Fierce discovered in scope: "+str(fiercecount)
+    if noscope:
+        print good+"Total discovered hostnames (discovered-hostnames.txt): "+str(len(scopehostnames))
+    else:
+        print good+"Total in-scope hostnames (inscope-hostnames.txt): "+str(len(scopehostnames))
 
-def main():
+def main(nmaprun, mass, bing):
     printtitle()
     if os.path.isdir(fullpath):
-        resp = raw_input(warn+"Directory "+fullpath+" exists. Overwrite? (y|n): ")
         goodresp = 0
         while goodresp == 0:
+            resp = raw_input(warn+"Directory "+fullpath+" exists. Overwrite? (y|n): ")
             if "y" in resp:
                 print warn+"Overwriting "+fullpath
                 shutil.rmtree(fullpath)
@@ -627,18 +700,40 @@ def main():
                 sys.exit()
             else:
                 print warn+"Invalid Option..."
+            print ""
     else:
         os.mkdir(fullpath)
-    os.mkdir(fullpath+"/fierce")
-    print mods+"= = = IP Parser = = ="+mode
-    if synscope == True:
-        parse_synack()
-    else:
-        parse_scope()
+    # Check for Shodan Key of Shodan option is enabled
+    if shodan == True and len(apikey) < 1:
+        print warn+"Shodan requires an API Key. Please add it with the '-k' switch"
+        print warn+"Alternatively, you can hard code it in the 'apikey' variable on line 30"
+        sys.exit()
+    # Reseting some switches based on Noscope and filein
+    if noscope:
+        if nmaprun and not filein:
+            print warn+"Nmap requires target IP addresses, disabling Nmap scan"
+            nmaprun = False
+        if mass and not filein:
+            print warn+"Masscan requires target IP addresses, disabling Masscan"
+            mass = False
+        if bing and not filein:
+            print warn+"Bing search requires target IP addresses, disabling Bing search"
+            bing = False
+    # Check for input file if noscope is not set
+    if noscope == False:
+        if not filein:
+            print warn+"Input file (-i) Required, unless No Scope is set (-N)"
+            sys.exit()
+        # Check for synscope and parse
+        print mods+"= = = IP Parser = = ="+mode
+        if synscope == True:
+            parse_synack()
+        else:
+            parse_scope() 
     if domains > 0:
         print mods+"= = = Custom Domains = = ="+mode
         adddomains()
-    if nmaprun:
+    if nmaprun == True:
         print mods+"= = = Nmap Rev Lookup = = ="+mode
         nmapresolve()
     if mass:
@@ -652,7 +747,12 @@ def main():
         print mods+"= = = Crt.sh Transperency Search = = ="+mode
         checkcrtsh()
         resolvecrt()
+    if shodan:
+        os.mkdir(fullpath+"/shodan")
+        print mods+"= = = Shodan Search = = ="+mode
+        shodansearch()
     if fierce:
+        os.mkdir(fullpath+"/fierce")
         print mods+"= = = Fierce DNS Bruteforce = = ="+mode
         genfierce()
         execfierce()
@@ -668,12 +768,15 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--mass', action="store_true", default=False, help="masscan for 443 and pull hostnames from certs")
     parser.add_argument('-b', '--bing', action="store_true", default=False, help="Bing IP Search")
     parser.add_argument('-c', '--crtsh', action='store_true', default=False, help="Check crt.sh for associated hostnames")
+    parser.add_argument('-s', '--shodan', action='store_true', default=False, help="Search Shodan, require API key (-k)")
+    parser.add_argument('-k', '--shodankey', help="API key for Shodan, can also be hard coded")
     parser.add_argument('-f', '--fierce', action='store_true', default=False, help="Execute fierce against discovered (sub)domains")
     parser.add_argument('-t', '--timeout', default=10, help="Socket timeout, default 10")
     parser.add_argument('-o', '--outdir', default="scoper", help="Output directory, relative, no ./ needed")
     parser.add_argument('-a', '--execall', action="store_true", default=False, help="same as -n -m -b -c -f")
+    parser.add_argument('-q', '--quick', action="store_true", default=False, help="same as -n -m -b -c")
     parser.add_argument('-N', '--noscope', action="store_true", default=False, help="Disable scope comparison")
-    parser.add_argument('-s', '--synack', action="store_true", default=False, help="Take copy/paste from Synack scope section")
+    parser.add_argument('-S', '--synack', action="store_true", default=False, help="Take copy/paste from Synack scope section")
     args = parser.parse_args()
     filein = args.filein
     domains = args.domains
@@ -681,10 +784,13 @@ if __name__ == '__main__':
     mass = args.mass
     bing = args.bing
     crtsh = args.crtsh
+    shodan = args.shodan
+    shodankey = args.shodankey
     fierce = args.fierce
     timeout = args.timeout
     outdir = args.outdir
     execall = args.execall
+    quick = args.quick
     noscope = args.noscope
     synscope = args.synack
     if execall:
@@ -693,6 +799,13 @@ if __name__ == '__main__':
         bing = True
         crtsh = True
         fierce = True
+    if quick:
+        nmaprun = True
+        mass = True
+        bing = True
+        crtsh = True
+    if shodankey > 0:
+        apikey = shodankey
     fullpath = os.getcwd()+"/"+outdir+"/"
     # Default socket/ssl stuff
     socket.setdefaulttimeout(timeout)
@@ -700,4 +813,4 @@ if __name__ == '__main__':
     sslcontext.check_hostname=False
     sslcontext.verify_mode = ssl.CERT_NONE
 
-    main()
+    main(nmaprun, mass, bing)
