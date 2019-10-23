@@ -265,7 +265,7 @@ def parsemass():
                         subnum = int(len(namesplit) - 1)
                         if namesplit[subnum].isdigit() == False:
                             masshostnames.append((ip, name))
-            except (ssl.SSLEOFError, ssl.SSLError, socket.error, LookupError):
+            except (TypeError, ssl.SSLEOFError, ssl.SSLError, socket.error, LookupError):
                 pass
             except (KeyboardInterrupt, SystemExit):
                 print ""
