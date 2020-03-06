@@ -30,7 +30,7 @@ from time import sleep
 #API Key for Shodan
 apikey = ""
 
-# Global declairations. Some of this may not need to be global, but if it works, it works
+# Global declairations. This should be your first indication that I don't really know what I'm doing. There are many more indications throughout this file.
 cidrs = []              # Input file parsed
 parserr = []            # Errored parsing IPs
 scope = []              # Individual IPs in scope
@@ -48,6 +48,7 @@ binghostnames = []      # Hostnames discovered via Bing IP search
 masscope = []           # Target IPs to give to masscan, broken down into 256 IP chunks
 masshosts = []          # Inital masscan ips with 443 open
 masshostnames = []      # discovered hostnames
+shodanfound = []
 basedomains = []
 fullpath = ""           # Output path, default ./scoper
 ccodes = ['ac','ad','ae','af','ag','ai','al','am','an','ao','aq','ar','as','at','au','aw','ax','az','ba','bb','bd','be','bf','bg','bh','bi','bj','bl','bm','bn','bo','bq','br','bs','bt','bv','bw','by','bz','ca','cc','cd','cf','cg','ch','ci','ck','cl','cm','cn','co','cr','cu','cv','cw','cx','cy','cz','de','dj','dk','dm','do','dz','ec','ee','eg','eh','er','es','et','eu','fi','fj','fk','fm','fo','fr','ga','gb','gd','ge','gf','gg','gh','gi','gl','gm','gn','gp','gq','gr','gs','gt','gu','gw','gy','hk','hm','hn','hr','ht','hu','id','ie','il','im','in','io','iq','ir','is','it','je','jm','jo','jp','ke','kg','kh','ki','km','kn','kp','kr','kw','ky','kz','la','lb','lc','li','lk','lr','ls','lt','lu','lv','ly','ma','mc','md','me','mf','mg','mh','mk','ml','mm','mn','mo','mp','mq','mr','ms','mt','mu','mv','mw','mx','my','mz','na','nc','ne','nf','ng','ni','nl','no','np','nr','nu','nz','om','pa','pe','pf','pg','ph','pk','pl','pm','pn','pr','ps','pt','pw','py','qa','re','ro','rs','ru','rw','sa','sb','sc','sd','se','sg','sh','si','sj','sk','sl','sm','sn','so','sr','ss','st','su','sv','sx','sy','sz','tc','td','tf','tg','th','tj','tk','tl','tm','tn','to','tp','tr','tt','tv','tw','tz','ua','ug','uk','um','us','uy','uz','va','vc','ve','vg','vi','vn','vu','wf','ws','yt','za','zm','zw']
@@ -132,6 +133,17 @@ def adddomains():
         print stat+"    "+domain
     return argdomains
 
+# Add domains from file
+def adddomains_file():
+    print stat+"Adding Custom Domains"
+    with open(domainsfile) as f:
+        lines = f.readlines()
+        for line in lines:
+            domain = line.rstrip()
+            argdomains.append(domain.rstrip())
+            print stat+"    "+domain
+    return argdomains
+
 # Nmap reverse DNS 
 def nmapresolve():
     ipcount = len(scope)
@@ -156,7 +168,7 @@ def nmapresolve():
             for host in resolved.hosts:
                 for hostname in host.hostnames:
                     hostname = hostname.lower()
-                    if not re.findall('[0-9]{1,3}?\-[0-9]{1,3}\-[0-9]{1,3}\-[0-9]{1,3}',hostname) and not re.findall('[0-9]{1,3}?\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}',hostname) and 'zayo.com' not in hostname and "ip-addr" not in hostname and "Level3" not in hostname and "in-addr" not in hostname and '.' in hostname:
+                    if not re.findall('[0-9]{1,3}?\-[0-9]{1,3}\-[0-9]{1,3}\-[0-9]{1,3}',hostname) and not re.findall('[0-9]{1,3}?\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}',hostname) and 'zayo.com' not in hostname and "ip-addr" not in hostname and "Level3" not in hostname and "in-addr" not in hostname and "q9.net" not in hostname and '.' in hostname:
                         nmaphostnames.append((host.address, hostname))
         except (KeyboardInterrupt, SystemExit):
             goodresp = 0
@@ -468,11 +480,20 @@ def shodansearch():
         try:
             datarecv = urllib2.urlopen(shodanurl, context=sslcontext)
             datatext = datarecv.readlines()
+            ports=json.loads(datatext[0]["ports"])
+            names=json.loads(datatext[0]["hostnames"])
             for line in datatext:
                 with open(fullpath+"/shodan/"+ip+".json",'a+') as f:
                     f.write(line)
-            #if (ip, hostname) not in shodanhostnames:
-                #shodanhostnames.append((ip, hostname))
+            for port in ports:
+                with open(fullpath+"shodan_ports.txt", 'a+') as f:
+                    f.write(ip+":"+port+"\n")
+            for name in names:
+                with open(fullpath+"shodan_names.txt", 'a+') as f:
+                    f.write(ip+":"+name+"\n")
+                if (ip,name) not in shodanfound:
+                    shodanfound.appends((ip,name))
+
         except (KeyboardInterrupt, SystemExit):
             print ""
             goodresp = 0
@@ -488,7 +509,7 @@ def shodansearch():
                     print warn+"Invalid Option..."
         except:
             pass
-        sleep(1.5)
+        sleep(1)
     print "\n"+good+"Shodan search complete. Hosts found: "
     #return shodanhostnames
 
@@ -600,10 +621,16 @@ def resultsout():
             if pair[0] in scope and pair not in scopehostnames:
                 scopehostnames.append(pair)
                 fiercecount += 1
+        shodancount = 0
+        for pair in shodanfound:
+            if pair[0] in scope and pair not in scopehostnames:
+                scopehostnames.append(pair)
+                shdoancount += 1
         for pair in scopehostnames:
             with open(fullpath+"inscope-hostnames.txt","a+") as f:
                 f.write(pair[0]+" - "+pair[1].rstrip('.')+'\n')
     if noscope:
+        nmapcount = 0
         for pair in nmaphostnames:
             if pair not in scopehostnames:
                 scopehostnames.append(pair)
@@ -628,6 +655,11 @@ def resultsout():
             if pair not in scopehostnames:
                 scopehostnames.append(pair)
                 fiercecount += 1
+        shodancount = 0
+        for pair in shodanfound:
+            if pair not in scopehostnames:
+                scopehostnames.append(pair)
+                shodancount += 1
         for pair in scopehostnames:
             with open(fullpath+"discovered-hostnames.txt","a+") as f:
                 f.write(pair[0]+" - "+pair[1].rstrip('.')+'\n')
@@ -719,6 +751,11 @@ def main(nmaprun, mass, bing):
         if bing and not filein:
             print warn+"Bing search requires target IP addresses, disabling Bing search"
             bing = False
+        if filein > 0:
+            if synscope == True:
+                parse_synack()
+            else:
+                parse_scope()
     # Check for input file if noscope is not set
     if noscope == False:
         if not filein:
@@ -733,6 +770,9 @@ def main(nmaprun, mass, bing):
     if domains > 0:
         print mods+"= = = Custom Domains = = ="+mode
         adddomains()
+    if domainsfile > 0:
+        print mods+"= = = Custom Domains = = ="+mode
+        adddomains_file()
     if nmaprun == True:
         print mods+"= = = Nmap Rev Lookup = = ="+mode
         nmapresolve()
@@ -764,6 +804,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(usage='./scoper.py -i <input_file> -d <custom_domain> -n -m -b -c -f')
     parser.add_argument('-i', '--filein', help="Input file, accepts all cidrize formats")
     parser.add_argument('-d', '--domains', help="Additional domains to search")
+    parser.add_argument('-D', '--domainsfile', help="Additional domains from file")
     parser.add_argument('-n', '--nmaprun', action='store_true', default=False, help="Use nmap for reverse DNS")
     parser.add_argument('-m', '--mass', action="store_true", default=False, help="masscan for 443 and pull hostnames from certs")
     parser.add_argument('-b', '--bing', action="store_true", default=False, help="Bing IP Search")
@@ -780,6 +821,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     filein = args.filein
     domains = args.domains
+    domainsfile = args.domainsfile
     nmaprun = args.nmaprun
     mass = args.mass
     bing = args.bing
@@ -787,7 +829,7 @@ if __name__ == '__main__':
     shodan = args.shodan
     shodankey = args.shodankey
     fierce = args.fierce
-    timeout = args.timeout
+    timeout = int(args.timeout)
     outdir = args.outdir
     execall = args.execall
     quick = args.quick
